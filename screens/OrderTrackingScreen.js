@@ -1,213 +1,161 @@
-import React, { useMemo, useEffect, useState, useCallback } from "react";
+// ─────────────────────────────────────────────────────────────
+// src/screens/OrderTrackingScreen.jsx
+// Rastreo de orden con marcador animado en tiempo real
+// ─────────────────────────────────────────────────────────────
+"use client";
+
+import {
+  useMemo,
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+} from "react";
 import {
   StyleSheet,
   View,
   Text,
-  FlatList,
   Image,
   ActivityIndicator,
   ScrollView,
   RefreshControl,
   TouchableOpacity,
 } from "react-native";
+import MapView, {
+  Marker,
+  Polyline,
+  AnimatedRegion,
+  Animated as AnimatedMap,
+} from "react-native-maps";
+import * as Location from "expo-location";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Feather } from "@expo/vector-icons";
+import { Feather, MaterialIcons } from "@expo/vector-icons";
 import { createSelector, shallowEqual } from "@reduxjs/toolkit";
 import { useSelector, useDispatch } from "react-redux";
 import axios from "axios";
 import { API_URL } from "@env";
-import { setCurrentOrder } from "../store/slices/order.slice"; // Ajusta ruta si hace falta
+import {
+  setCurrentOrder,
+  updateOrderLocation,
+} from "../store/slices/order.slice";
+import useSocket from "../config/socket";
 
-/* -------------------------------------------------------------------------- */
-/*                              SELECTORES REDUX                              */
-/* -------------------------------------------------------------------------- */
-const selectOrderSlice = (state) => state.order;
-const selectAuthSlice = (state) => state.auth;
+/* ───────────── Status helper ───────────── */
+const statusConfig = {
+  pendiente:  { label: "Pending",   color: "#A0A0A0" },
+  aceptada:   { label: "Accepted",  color: "#F5F5DC" },
+  envio:      { label: "Shipping",  color: "#F5F5DC" },
+  finalizada: { label: "Delivered", color: "#F5F5DC" },
+  rechazada:  { label: "Rejected",  color: "#FF5252" },
+  cancelada:  { label: "Cancelled", color: "#FF9800" },
+};
+const getStatus = (key = "") =>
+  statusConfig[key.toLowerCase()] || { label: key, color: "#A0A0A0" };
 
-const makeCurrentOrderSelector = createSelector(
-  selectOrderSlice,
-  (order) => ({
-    currentOrder: order.currentOrder,
-    isLoading:    order.isLoading,
-    error:        order.error,
-  })
-);
+/* ───────────── Selectores Redux ───────────── */
+const selectOrderSlice  = (s) => s.order;
+const makeOrderSelector = createSelector(selectOrderSlice, (o) => ({
+  currentOrder: o.currentOrder,
+  isLoading:    o.isLoading,
+  error:        o.error,
+}));
 
-const makeTokenSelector = createSelector(
-  selectAuthSlice,
-  (auth) => auth?.user?.token || null
-);
-
-/* -------------------------------------------------------------------------- */
-/*                           COMPONENTE OrderTracking                        */
-/* -------------------------------------------------------------------------- */
+/* ─────────────────────────────────────────── */
 export default function OrderTrackingScreen({ navigation }) {
   const dispatch = useDispatch();
+  const socket   = useSocket();
+
   const { currentOrder, isLoading, error } = useSelector(
-    makeCurrentOrderSelector,
-    shallowEqual
+    makeOrderSelector,
+    shallowEqual,
   );
-  const token = useSelector((state) => state.user.token);
+  const token = useSelector((s) => s.user.token);
 
-  /* Pull-to-refresh */
+  /* ---------- Pull-to-refresh ---------- */
   const [refreshing, setRefreshing] = useState(false);
-
-  /* Fetch full order details */
-  const fetchOrderDetails = useCallback(async () => {
-    console.log("aqui")
-      console.log(currentOrder.id, token)
+  const fetchOrder = useCallback(async () => {
     if (!currentOrder?.id || !token) return;
     try {
-      const { data } = await axios.get(
-        `${API_URL}/orders/${currentOrder.id}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const { data } = await axios.get(`${API_URL}/orders/${currentOrder.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       dispatch(setCurrentOrder(data));
-    } catch (err) {
-      console.error("Error refreshing order:", err);
+    } catch (e) {
+      console.error("refresh order:", e.message);
     }
   }, [currentOrder?.id, token, dispatch]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchOrderDetails();
+    await fetchOrder();
     setRefreshing(false);
-  }, [fetchOrderDetails]);
+  }, [fetchOrder]);
 
-  /* Fetch initial order & address */
-  const [address, setAddress]         = useState(null);
-  const [addrLoading, setAddrLoading] = useState(false);
-  const [addrError, setAddrError]     = useState(null);
-
-  
+  /* ---------- Socket: ubicación ---------- */
   useEffect(() => {
-    fetchOrderDetails();
-  }, [fetchOrderDetails]);
+    if (!socket || !currentOrder?.id) return;
 
-  const formatAddress = (addr) => {
-    if (!addr) return "";
-    return [
-      addr.street,
-      addr.number,
-      addr.apartment && `Apt ${addr.apartment}`,
-      addr.city,
-      addr.state,
-      addr.zip,
-    ]
-      .filter(Boolean)
-      .join(", ");
-  };
+    const handler = (data) => {
+      if (data.orderId !== currentOrder.id) return;
+      dispatch(
+        updateOrderLocation({
+          deliveryLat:  data.deliveryLat,
+          deliveryLng:  data.deliveryLng,
+          deliveryName: data.deliveryName,
+        }),
+      );
+    };
 
-  const countItems = useMemo(
-    () =>
-      (currentOrder?.order_items || []).reduce(
-        (sum, it) => sum + Number(it.quantity || 0),
-        0
-      ),
-    [currentOrder]
-  );
+    socket.on("driver_location", handler);
+    return () => socket.off("driver_location", handler);
+  }, [socket, currentOrder?.id, dispatch]);
 
-  const statusConfig = {
-    pendiente:  { label: "Pending",   color: "#757575" },
-    aceptada:   { label: "Accepted",  color: "#2196F3" },
-    envio:      { label: "Shipping",  color: "#9C27B0" },
-    finalizada: { label: "Delivered", color: "#4CAF50" },
-    rechazada:  { label: "Rejected",  color: "#F44336" },
-    cancelada:  { label: "Cancelled", color: "#FF9800" },
-  };
+  /* ---------- Auto-refresh cada 10 s ---------- */
+  useEffect(() => {
+    if (currentOrder?.status === "envio") {
+      const id = setInterval(fetchOrder, 10000);
+      return () => clearInterval(id);
+    }
+  }, [currentOrder?.status, fetchOrder]);
 
-  const getStatus = (key = "") =>
-    statusConfig[key.toLowerCase()] || { label: key, color: "#757575" };
+  /* ---------- Localización del dispositivo ---------- */
+  const [deviceCoords, setDeviceCoords] = useState(null);
+  useEffect(() => {
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === "granted") {
+        const loc = await Location.getCurrentPositionAsync({});
+        setDeviceCoords({
+          latitude:  loc.coords.latitude,
+          longitude: loc.coords.longitude,
+        });
+      }
+    })();
+  }, []);
 
-  const StatusBadge = ({ status }) => {
-    const { label, color } = getStatus(status);
-    return (
-      <View style={[styles.statusBadge, { backgroundColor: color }]}>
-        <Text style={styles.statusBadgeText}>{label}</Text>
-      </View>
-    );
-  };
-
-  const InfoCard = ({ icon, label, value, iconColor = "#4CAF50" }) => (
-    <View style={styles.infoCard}>
-      <View style={[styles.infoIcon, { backgroundColor: iconColor + "20" }]}>
-        <Feather name={icon} size={20} color={iconColor} />
-      </View>
-      <View style={styles.infoContent}>
-        <Text style={styles.infoLabel}>{label}</Text>
-        <Text style={styles.infoValue}>{value}</Text>
-      </View>
-    </View>
-  );
-
-  const TrackingStep = ({ item, isLast }) => (
-    <View style={styles.trackingStep}>
-      <View style={styles.stepIconContainer}>
-        <View
-          style={[
-            styles.stepIcon,
-            item.completed ? styles.completedStepIcon : styles.pendingStepIcon,
-          ]}
-        >
-          <Feather name={item.completed ? "check" : "clock"} size={16} color="#FFF" />
-        </View>
-        {!isLast && (
-          <View
-            style={[
-              styles.stepLine,
-              item.completed ? styles.completedLine : styles.pendingLine,
-            ]}
-          />
-        )}
-      </View>
-      <View style={styles.stepContent}>
-        <Text style={[styles.stepTitle, item.completed ? styles.completedText : styles.pendingText]}>
-          {item.title}
-        </Text>
-        <Text style={styles.stepTime}>{item.time}</Text>
-      </View>
-    </View>
-  );
-
-  const CodeDisplay = ({ title, code, icon, color }) => (
-    <View style={styles.codeContainer}>
-      <View style={[styles.codeIcon, { backgroundColor: color + "20" }]}>
-        <Feather name={icon} size={24} color={color} />
-      </View>
-      <Text style={styles.codeLabel}>{title}</Text>
-      <Text style={[styles.codeValue, { color }]}>{code}</Text>
-    </View>
-  );
-
-  const handleBackToHome = () => {
-    navigation.reset({ index: 0, routes: [{ name: "HomeTabs" }] });
-  };
-
+  /* ---------- Loading / error ---------- */
   if (isLoading || !currentOrder) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         {error ? (
           <View style={styles.errorContainer}>
-            <Feather name="alert-circle" size={48} color="#F44336" />
+            <Feather name="alert-circle" size={48} color="#FF5252" />
             <Text style={styles.errorTitle}>Something went wrong</Text>
             <Text style={styles.errorText}>{error}</Text>
-            <TouchableOpacity style={styles.homeButton} onPress={handleBackToHome}>
-              <Feather name="home" size={20} color="#FFF" />
-              <Text style={styles.homeButtonText}>Back to Home</Text>
-            </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.loadingContent}>
-            <ActivityIndicator size="large" color="#4CAF50" />
-            <Text style={styles.loadingText}>Loading order...</Text>
+            <ActivityIndicator size="large" color="#F5F5DC" />
+            <Text style={styles.loadingText}>Loading order…</Text>
           </View>
         )}
       </SafeAreaView>
     );
   }
 
+  /* ---------- Destructuring de la orden ---------- */
   const {
-    shop = {},
+    shop          = {},
     pickupCode,
     deliveryCode,
     price,
@@ -215,43 +163,180 @@ export default function OrderTrackingScreen({ navigation }) {
     finalPrice,
     status,
     id,
-    order_items = [],
+    address,
+    deliveryLat,
+    deliveryLng,
+    deliveryName,
+    deliveryPayload,
   } = currentOrder;
 
+  /* ---------- Coordenadas del usuario ---------- */
+  const payloadCoords = deliveryPayload?.user?.lat_lng || [];
+  const userLat = parseFloat(
+    address?.lat          ??
+    address?.latitude     ??
+    payloadCoords[0]      ??
+    deviceCoords?.latitude ??
+    0,
+  );
+  const userLng = parseFloat(
+    address?.lng          ??
+    address?.longitude    ??
+    payloadCoords[1]      ??
+    deviceCoords?.longitude ??
+    0,
+  );
+
+  /* ---------- Coordenadas del driver ---------- */
+  const delLat = parseFloat(deliveryLat ?? 0);
+  const delLng = parseFloat(deliveryLng ?? 0);
+
+  const hasDriver = !!delLat && !!delLng && !isNaN(delLat) && !isNaN(delLng);
+  const hasUser   = !!userLat && !!userLng && !isNaN(userLat) && !isNaN(userLng);
+
+  const showMap = status === "envio" && hasDriver && (hasUser || deviceCoords);
+
+  /* ---------- Animated marker ---------- */
+  const animatedCoord = useRef(
+    new AnimatedRegion({
+      latitude:       hasDriver ? delLat : 0,
+      longitude:      hasDriver ? delLng : 0,
+      latitudeDelta:  0.001,
+      longitudeDelta: 0.001,
+    }),
+  ).current;
+
+  useEffect(() => {
+    if (!hasDriver) return;
+    animatedCoord.timing({
+      latitude:  delLat,
+      longitude: delLng,
+      duration:  1500,
+      useNativeDriver: false,
+    }).start();
+  }, [delLat, delLng, hasDriver, animatedCoord]);
+
+  /* ---------- Helpers ---------- */
+  const formatAddress = (addr) =>
+    !addr
+      ? ""
+      : [
+          addr.street,
+          addr.number,
+          addr.apartment && `Apt ${addr.apartment}`,
+          addr.city,
+          addr.state,
+          addr.zip,
+        ]
+          .filter(Boolean)
+          .join(", ");
+
+  const countItems = useMemo(
+    () =>
+      (currentOrder?.order_items || []).reduce(
+        (s, it) => s + Number(it.quantity || 0),
+        0,
+      ),
+    [currentOrder],
+  );
+
+  /* ---------- Región inicial del mapa ---------- */
+  const initialRegion = hasDriver
+    ? {
+        latitude:       hasUser ? (delLat + userLat) / 2 : delLat,
+        longitude:      hasUser ? (delLng + userLng) / 2 : delLng,
+        latitudeDelta:  hasUser ? Math.abs(delLat - userLat) * 2 + 0.02 : 0.02,
+        longitudeDelta: hasUser ? Math.abs(delLng - userLng) * 2 + 0.02 : 0.02,
+      }
+    : {
+        latitude:       0,
+        longitude:      0,
+        latitudeDelta:  0.02,
+        longitudeDelta: 0.02,
+      };
+
+  /* ---------- Render ---------- */
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
+        contentContainerStyle={{ paddingBottom: 28 }}
       >
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerTop}>
-            <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-              <Feather name="arrow-left" size={24} color="#212121" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.homeButton} onPress={handleBackToHome}>
-              <Feather name="home" size={20} color="#FFF" />
-              <Text style={styles.homeButtonText}>Home</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>Order Tracking</Text>
-            <Text style={styles.headerSubtitle}>Track your order in real time</Text>
-          </View>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Feather name="arrow-left" size={24} color="#F5F5DC" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Order Tracking</Text>
+          <View style={{ width: 44 }} />
         </View>
+
+        {/* Mapa */}
+        {showMap && (
+          <View style={styles.mapWrapper}>
+            <AnimatedMap
+              style={styles.map}
+              initialRegion={initialRegion}
+              showsUserLocation={false}
+              followsUserLocation={false}
+            >
+              {/* Línea entre driver ↔ usuario (si hay usuario) */}
+              {hasUser && (
+                <Polyline
+                  coordinates={[
+                    { latitude: delLat, longitude: delLng },
+                    { latitude: userLat, longitude: userLng },
+                  ]}
+                  strokeColor="#F5F5DC"
+                  strokeWidth={3}
+                />
+              )}
+
+              {/* Marker animado del delivery */}
+              <Marker.Animated
+                coordinate={animatedCoord}
+                title={deliveryName || "Delivery"}
+                pinColor="#FF0000"        // rojo brillante para distinguirse
+              />
+
+              {/* Dirección del usuario */}
+              {hasUser && (
+                <Marker
+                  coordinate={{ latitude: userLat, longitude: userLng }}
+                  title="Your address"
+                  pinColor="#4CAF50"
+                />
+              )}
+
+              {/* Ubicación del dispositivo (fallback) */}
+              {deviceCoords && (
+                <Marker
+                  coordinate={deviceCoords}
+                  title="You"
+                  pinColor="#2196F3"
+                />
+              )}
+            </AnimatedMap>
+          </View>
+        )}
 
         {/* Shop Info */}
         <View style={styles.card}>
           <View style={styles.shopHeader}>
             <View style={styles.shopLogoContainer}>
               <Image
-                source={{ uri: shop.logo || "https://via.placeholder.com/80" }}
+                source={{
+                  uri: shop.logo || "https://via.placeholder.com/80",
+                }}
                 style={styles.shopLogo}
               />
               <View style={styles.shopBadge}>
-                <Feather name="store" size={12} color="#FFF" />
+                <MaterialIcons name="store" size={12} color="#0A0C10" />
               </View>
             </View>
             <View style={styles.shopInfo}>
@@ -270,9 +355,9 @@ export default function OrderTrackingScreen({ navigation }) {
             <StatusBadge status={status} />
           </View>
           <View style={styles.infoGrid}>
-            <InfoCard icon="shopping-bag" label="Items" value={`${countItems}`} />
-            <InfoCard icon="hash"        label="Order ID" value={`#${id}`} iconColor="#4CAF50" />
-            <InfoCard icon="truck"       label="Delivery Fee" value={`$${deliveryFee}`} iconColor="#9C27B0" />
+            <InfoCard icon="shopping-bag" label="Items"     value={`${countItems}`} />
+            <InfoCard icon="hash"         label="Order ID"  value={`#${id}`}    />
+            <InfoCard icon="truck"        label="Delivery"  value={`$${deliveryFee}`} />
           </View>
         </View>
 
@@ -280,426 +365,161 @@ export default function OrderTrackingScreen({ navigation }) {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <Text style={styles.cardTitle}>Summary</Text>
-            <Feather name="credit-card" size={20} color="#4CAF50" />
+            <Feather name="credit-card" size={20} color="#F5F5DC" />
           </View>
           <View style={styles.summaryContent}>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Subtotal</Text>
-              <Text style={styles.summaryValue}>${price}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Delivery</Text>
-              <Text style={styles.summaryValue}>${deliveryFee}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Total</Text>
-              <Text style={styles.totalValue}>${finalPrice}</Text>
-            </View>
+            <Row label="Subtotal" value={`$${price}`} />
+            <Row label="Delivery" value={`$${deliveryFee}`} />
+            <Row label="Total"    value={`$${finalPrice}`} bold />
           </View>
         </View>
 
-        {/* Address */}
-        <View style={styles.card}>
-          <View style={styles.addressHeader}>
-            <Feather name="map-pin" size={20} color="#FF5722" />
-            <Text style={styles.cardTitle}>Delivery Address</Text>
-          </View>
-          {addrLoading ? (
-            <ActivityIndicator size="small" color="#FF5722" />
-          ) : addrError ? (
-            <Text style={[styles.addressText, { color: "#F44336" }]}>{addrError}</Text>
-          ) : (
-            <Text style={styles.addressText}>{formatAddress(address)}</Text>
-          )}
-        </View>
+  
 
         {/* Codes */}
         <View style={styles.codesRow}>
-          <CodeDisplay title="Pickup Code"   code={pickupCode}   icon="package" color="#FF9800" />
-          <CodeDisplay title="Delivery Code" code={deliveryCode} icon="truck"   color="#4CAF50" />
+          <CodeDisplay
+            title="Delivery Code"
+            code={pickupCode}
+            icon="package"
+            color="#F5F5DC"
+          />
         </View>
-
-        
       </ScrollView>
     </SafeAreaView>
   );
-
 }
 
-/* -------------------------------------------------------------------------- */
-/*                                   STYLES                                   */
-/* -------------------------------------------------------------------------- */
+/* -------- Sub-componentes UI -------- */
+const StatusBadge = ({ status }) => {
+  const { label, color } = getStatus(status);
+  return (
+    <View
+      style={[
+        styles.statusBadge,
+        {
+          backgroundColor: color === "#F5F5DC" ? "#1A2332" : "transparent",
+          borderColor:     color,
+        },
+      ]}
+    >
+      <Text style={[styles.statusBadgeText, { color }]}>{label}</Text>
+    </View>
+  );
+};
 
+const InfoCard = ({ icon, label, value }) => (
+  <View style={styles.infoCard}>
+    <View style={styles.infoIcon}>
+      <Feather name={icon} size={20} color="#F5F5DC" />
+    </View>
+    <Text style={styles.infoLabel}>{label}</Text>
+    <Text style={styles.infoValue}>{value}</Text>
+  </View>
+);
+
+const Row = ({ label, value, bold }) => (
+  <View style={styles.summaryRow}>
+    <Text style={[styles.summaryLabel, bold && { fontWeight: "700" }]}>{label}</Text>
+    <Text style={[styles.summaryValue, bold && { fontWeight: "700" }]}>{value}</Text>
+  </View>
+);
+
+const CodeDisplay = ({ title, code, icon, color }) => (
+  <View style={styles.codeContainer}>
+    <View style={styles.codeIcon}>
+      <Feather name={icon} size={24} color={color} />
+    </View>
+    <Text style={styles.codeLabel}>{title}</Text>
+    <Text style={[styles.codeValue, { color }]}>{code}</Text>
+  </View>
+);
+
+/* ------------ Styles ------------ */
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F5F7FA",
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: "#F5F7FA",
-  },
-  loadingContent: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: "#757575",
-    fontWeight: "500",
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingHorizontal: 32,
-  },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#212121",
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  errorText: {
-    fontSize: 16,
-    color: "#757575",
-    textAlign: "center",
-    lineHeight: 24,
-    marginBottom: 24,
-  },
+  container:        { flex: 1, backgroundColor: "#0A0C10" },
+  loadingContainer: { flex: 1, backgroundColor: "#0A0C10" },
+  loadingContent:   { flex: 1, justifyContent: "center", alignItems: "center" },
+  loadingText:      { marginTop: 16, color: "#A0A0A0" },
+  errorContainer:   { flex: 1, justifyContent: "center", alignItems: "center" },
+  errorTitle:       { marginTop: 12, color: "#F5F5DC", fontSize: 18, fontWeight: "700" },
+  errorText:        { color: "#A0A0A0", marginTop: 4 },
   header: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
-  headerTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  headerContent: {
-    alignItems: "center",
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: "#212121",
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 16,
-    color: "#757575",
+    flexDirection:   "row",
+    alignItems:      "center",
+    justifyContent:  "space-between",
+    padding:         16,
   },
   backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#FFFFFF",
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    width:             44,
+    height:            44,
+    borderRadius:      22,
+    backgroundColor:   "#121620",
+    justifyContent:    "center",
+    alignItems:        "center",
   },
-  homeButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#4CAF50",
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 22,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  homeButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "600",
-    marginLeft: 6,
-  },
-  bottomActions: {
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-  },
-  fullHomeButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#4CAF50",
-    paddingVertical: 16,
-    borderRadius: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  fullHomeButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "bold",
-    marginLeft: 8,
-  },
+  headerTitle:    { color: "#F5F5DC", fontSize: 18, fontWeight: "700" },
+  mapWrapper:     { height: 260, margin: 16, borderRadius: 16, overflow: "hidden" },
+  map:            { flex: 1 },
   card: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#121620",
     marginHorizontal: 16,
-    marginBottom: 16,
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    marginBottom:    16,
+    padding:         16,
+    borderRadius:    16,
   },
-  cardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#212121",
-  },
-  shopHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  shopLogoContainer: {
-    position: "relative",
-    marginRight: 16,
-  },
-  shopLogo: {
-    width: 64,
-    height: 64,
-    borderRadius: 16,
-    backgroundColor: "#F5F5F5",
-  },
+  shopHeader:        { flexDirection: "row", alignItems: "center" },
+  shopLogoContainer: { position: "relative", marginRight: 12 },
+  shopLogo:          { width: 60, height: 60, borderRadius: 12, backgroundColor: "#1A2332" },
   shopBadge: {
-    position: "absolute",
-    top: -4,
-    right: -4,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: "#4CAF50",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#FFFFFF",
+    position:        "absolute",
+    top:             -4,
+    right:           -4,
+    width:           24,
+    height:          24,
+    borderRadius:    12,
+    backgroundColor: "#F5F5DC",
+    justifyContent:  "center",
+    alignItems:      "center",
   },
-  shopInfo: {
-    flex: 1,
-  },
-  shopName: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#212121",
-    marginBottom: 4,
-  },
-  shopDescription: {
-    fontSize: 14,
-    color: "#757575",
-    lineHeight: 20,
-  },
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-  },
-  statusBadgeText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "bold",
-  },
-  infoGrid: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
+  shopName:        { color: "#F5F5DC", fontWeight: "700", fontSize: 16 },
+  shopDescription: { color: "#A0A0A0", fontSize: 12, marginTop: 2 },
+  cardHeader:      { flexDirection: "row", justifyContent: "space-between", marginBottom: 12 },
+  cardTitle:       { color: "#F5F5DC", fontWeight: "700", fontSize: 16 },
+  statusBadge:     { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 16, borderWidth: 1 },
+  statusBadgeText: { fontSize: 12, fontWeight: "700" },
+  infoGrid:        { flexDirection: "row", justifyContent: "space-between" },
   infoCard: {
-    flex: 1,
-    alignItems: "center",
-    padding: 12,
-    backgroundColor: "#F8F9FA",
-    borderRadius: 12,
+    flex:            1,
+    alignItems:      "center",
+    padding:         12,
+    backgroundColor: "#1A2332",
+    borderRadius:    12,
     marginHorizontal: 4,
   },
-  infoIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  infoContent: {
-    alignItems: "center",
-  },
-  infoLabel: {
-    fontSize: 12,
-    color: "#757575",
-    marginBottom: 2,
-  },
-  infoValue: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#212121",
-    textAlign: "center",
-  },
-  summaryContent: {
-    marginTop: 8,
-  },
-  summaryRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingVertical: 8,
-  },
-  summaryLabel: {
-    fontSize: 14,
-    color: "#757575",
-  },
-  summaryValue: {
-    fontSize: 14,
-    color: "#212121",
-    fontWeight: "500",
-  },
-  divider: {
-    height: 1,
-    backgroundColor: "#E0E0E0",
-    marginVertical: 12,
-  },
-  totalLabel: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#212121",
-  },
-  totalValue: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#4CAF50",
-  },
-  addressHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  addressIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#FF572220",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
-  addressText: {
-    fontSize: 14,
-    color: "#757575",
-    lineHeight: 22,
-    paddingLeft: 52,
-  },
+  infoIcon:   { marginBottom: 6 },
+  infoLabel:  { color: "#A0A0A0", fontSize: 12 },
+  infoValue:  { color: "#F5F5DC", fontSize: 14, fontWeight: "700" },
+  summaryContent: { marginTop: 8 },
+  summaryRow:     { flexDirection: "row", justifyContent: "space-between", marginVertical: 4 },
+  summaryLabel:   { color: "#A0A0A0" },
+  summaryValue:   { color: "#F5F5DC" },
   codesRow: {
-    flexDirection: "row",
+    flexDirection:   "row",
+    gap:             12,
     marginHorizontal: 16,
-    marginBottom: 16,
-    gap: 12,
+    marginBottom:     16,
   },
   codeContainer: {
-    flex: 1,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 20,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    flex:            1,
+    alignItems:      "center",
+    backgroundColor: "#121620",
+    paddingVertical: 16,
+    borderRadius:    16,
   },
-  codeIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  codeLabel: {
-    fontSize: 12,
-    color: "#757575",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  codeValue: {
-    fontSize: 24,
-    fontWeight: "bold",
-    letterSpacing: 4,
-  },
-  trackingContent: {
-    marginTop: 8,
-  },
-  trackingStep: {
-    flexDirection: "row",
-    marginBottom: 20,
-  },
-  stepIconContainer: {
-    alignItems: "center",
-    marginRight: 16,
-  },
-  stepIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  completedStepIcon: {
-    backgroundColor: "#4CAF50",
-  },
-  pendingStepIcon: {
-    backgroundColor: "#BDBDBD",
-  },
-  stepLine: {
-    position: "absolute",
-    top: 36,
-    left: 17,
-    width: 2,
-    height: 32,
-  },
-  completedLine: {
-    backgroundColor: "#4CAF50",
-  },
-  pendingLine: {
-    backgroundColor: "#E0E0E0",
-  },
-  stepContent: {
-    flex: 1,
-    paddingTop: 4,
-  },
-  stepTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 4,
-  },
-  completedText: {
-    color: "#212121",
-  },
-  pendingText: {
-    color: "#757575",
-  },
-  stepTime: {
-    fontSize: 14,
-    color: "#757575",
-  },
+  codeIcon:  { marginBottom: 6 },
+  codeLabel: { color: "#A0A0A0", fontSize: 12 },
+  codeValue: { fontSize: 20, fontWeight: "700", letterSpacing: 2 },
+  addressHeader: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
+  addressText:   { color: "#A0A0A0", lineHeight: 20 },
 });

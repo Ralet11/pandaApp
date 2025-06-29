@@ -8,6 +8,7 @@ import { useSelector, useDispatch } from "react-redux";
 import {
   updateOrderState,
   addHistoricOrder,
+  updateOrderLocation,   // ← nueva importación
 } from "../store/slices/order.slice";
 import { API_URL }                  from "@env";
 
@@ -31,10 +32,10 @@ export default function useSocket() {
     if (!userId || socketRef.current) return;
 
     socketRef.current = io(SOCKET_URL, {
-      transports: ["websocket"],     // sólo WebSocket, sin polling
+      transports: ["websocket"],      // WebSocket puro
       auth: { token },
       reconnectionAttempts: 5,
-      reconnectionDelay: 1500,
+      reconnectionDelay:   1500,
     });
 
     /* ---------- Conexión base ---------- */
@@ -51,16 +52,16 @@ export default function useSocket() {
       console.error("[socket] connect_error:", err.message),
     );
 
-    /* ---------- Evento principal ---------- */
+    /* ---------- Estado de la orden ---------- */
     socketRef.current.on(
       "order_state_changed",
       async ({ orderId, status }) => {
         console.log("[socket] order_state_changed:", orderId, status);
 
-        // 1️⃣  Actualizar Redux
+        // 1️⃣ Actualizar Redux
         dispatch(updateOrderState({ orderId, newStatus: status }));
 
-        // 2️⃣  Si la orden aún no está en store, fetch completo
+        // 2️⃣ Si la orden aún no está en store, fetch completo
         const {
           order: { activeOrders, historicOrders },
         } = store.getState();
@@ -80,10 +81,23 @@ export default function useSocket() {
           }
         }
 
-        // 3️⃣  Navegar al tracking
+        // 3️⃣ Navegar al tracking
         if (navigationRef.isReady()) {
           navigationRef.navigate("OrderTracking", { orderId });
         }
+      },
+    );
+
+    /* ---------- Ubicación en tiempo real ---------- */
+    socketRef.current.on(
+      "driver_location",
+      ({ orderId, deliveryLat, deliveryLng, deliveryName }) => {
+        console.log("[socket] driver_location:", orderId, deliveryLat, deliveryLng);
+
+        // Actualizar solo si estamos viendo esa orden
+        dispatch(
+          updateOrderLocation({ deliveryLat, deliveryLng, deliveryName }),
+        );
       },
     );
 

@@ -1,33 +1,43 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Platform, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useSelector, useDispatch } from 'react-redux';
-import axios from 'react-native-axios';
-import { API_URL } from '@env';
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  Platform,
+  ActivityIndicator,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import Icon from "react-native-vector-icons/MaterialCommunityIcons";
+import { useSelector, useDispatch } from "react-redux";
+import axios from "react-native-axios";
+import { API_URL } from "@env";
 import { setCurrentAddress } from "../store/slices/user.slice";
 
 const AddressesView = ({ navigation }) => {
+  /* ───────── Redux ───────── */
   const dispatch = useDispatch();
-  const user_id = useSelector((state) => state.user.userInfo.id);
   const token = useSelector((state) => state.user.token);
-  const currentAddress = useSelector((state) => state.user.currentAddress); // Dirección seleccionada
-  console.log(token)
+  const currentAddress = useSelector((state) => state.user.currentAddress);
 
+  /* ───────── Local ───────── */
   const [addresses, setAddresses] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  /* ───────── Fetch addresses ───────── */
   const fetchAddresses = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`${API_URL}/addresses`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      const res = await axios.get(`${API_URL}/addresses`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
-      setAddresses(response.data);
-    } catch (error) {
-      console.error('Error al obtener las direcciones:', error);
+      setAddresses(Array.isArray(res.data) ? res.data : []);
+    } catch (err) {
+      console.error("get addresses:", err);
+      setAddresses([]);
     } finally {
       setLoading(false);
     }
@@ -37,47 +47,51 @@ const AddressesView = ({ navigation }) => {
     fetchAddresses();
   }, []);
 
+  /* ───────── Handlers ───────── */
   const handleDeleteAddress = async (id) => {
     try {
       await axios.delete(`${API_URL}/addresses/${id}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
       setAddresses((prev) => prev.filter((addr) => addr.id !== id));
-    } catch (error) {
-      console.error('Error al eliminar la dirección:', error);
+      if (currentAddress?.id === id) dispatch(setCurrentAddress(null));
+    } catch (err) {
+      console.error("delete address:", err);
     }
   };
 
   const handleSelectAddress = (address) => {
-    // Guardar la dirección seleccionada en Redux
     dispatch(setCurrentAddress(address));
   };
 
+  /* ───────── UI ───────── */
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="arrow-left" size={24} color="#FFFFFF" />
+          <Icon name="arrow-left" size={24} color="#F5F5DC" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Dirección de entrega</Text>
+        <Text style={styles.headerTitle}>Delivery address</Text>
       </View>
 
+      {/* Body */}
       {loading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#D32F2F" />
+          <ActivityIndicator size="large" color="#F5F5DC" />
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent}>
+          {/* Add */}
           <TouchableOpacity
             style={styles.addButton}
-            onPress={() => navigation.navigate('SelectNewAddress')}
+            onPress={() => navigation.navigate("SelectNewAddress")}
           >
-            <Icon name="plus" size={20} color="#FFF" style={styles.addIcon} />
-            <Text style={styles.addButtonText}>Añadir dirección</Text>
+            <Icon name="plus" size={20} color="#0A0C10" style={styles.addIcon} />
+            <Text style={styles.addButtonText}>Add address</Text>
           </TouchableOpacity>
 
+          {/* List */}
           {addresses.length > 0 ? (
             addresses.map((address) => {
               const isSelected = currentAddress?.id === address.id;
@@ -86,32 +100,35 @@ const AddressesView = ({ navigation }) => {
                   key={address.id}
                   style={[
                     styles.addressCard,
-                    isSelected && styles.selectedAddressCard, // Aplica estilo si está seleccionada
+                    isSelected && styles.selectedAddressCard,
                   ]}
                   onPress={() => handleSelectAddress(address)}
                   activeOpacity={0.8}
                 >
-                  <Icon name="map-marker" size={24} color="#666" style={styles.locationIcon} />
+                  <Icon name="map-marker" size={24} color="#F5F5DC" style={styles.locationIcon} />
                   <View style={styles.addressInfo}>
                     <Text style={styles.addressName}>{address.street}</Text>
-                    <Text style={styles.addressDescription}>{address.type || 'Sin tipo'}</Text>
+                    <Text style={styles.addressDescription}>{address.type || "No type"}</Text>
                   </View>
 
                   {isSelected && (
-                    <Icon name="check-circle" size={20} color="#D32F2F" style={styles.tickIcon} />
+                    <Icon name="check-circle" size={20} color="#F5F5DC" style={styles.tickIcon} />
                   )}
 
                   <TouchableOpacity
                     style={styles.deleteButton}
                     onPress={() => handleDeleteAddress(address.id)}
                   >
-                    <Icon name="trash-can" size={20} color="#666" />
+                    <Icon name="trash-can" size={20} color="#FF5252" />
                   </TouchableOpacity>
                 </TouchableOpacity>
               );
             })
           ) : (
-            <Text style={styles.noAddressesText}>No tienes direcciones guardadas.</Text>
+            <View style={styles.emptyContainer}>
+              <Icon name="map-marker-outline" size={64} color="#A0A0A0" />
+              <Text style={styles.noAddressesText}>You have no saved addresses</Text>
+            </View>
           )}
         </ScrollView>
       )}
@@ -121,104 +138,79 @@ const AddressesView = ({ navigation }) => {
 
 export default AddressesView;
 
+/* ───────── Styles ───────── */
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F5F5', // Mismo fondo que el Dashboard
-  },
+  container: { flex: 1, backgroundColor: "#0A0C10" },
+
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#D32F2F', // Cambiado a rojo para coincidir con el Dashboard
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
+    backgroundColor: "#121620",
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
     ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 1,
-      },
-      android: {
-        elevation: 1,
-      },
+      ios: { shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 3 },
+      android: { elevation: 3 },
     }),
   },
   headerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFFFFF', // Texto blanco
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#F5F5DC",
     marginLeft: 16,
   },
-  backButton: {
-    padding: 4,
-  },
-  scrollContent: {
-    padding: 16,
-  },
+  backButton: { padding: 4 },
+
+  /* Loading */
+  loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+
+  /* Scroll & add */
+  scrollContent: { padding: 16 },
   addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#D32F2F', // Igual que el header y botones del Dashboard
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F5F5DC",
     borderRadius: 8,
-    padding: 12,
+    padding: 14,
     marginBottom: 16,
   },
-  addIcon: {
-    marginRight: 8,
-  },
-  addButtonText: {
-    color: '#FFF',
-    fontSize: 15,
-    fontWeight: '500',
-  },
+  addIcon: { marginRight: 8 },
+  addButtonText: { color: "#0A0C10", fontSize: 15, fontWeight: "600" },
+
+  /* Cards */
   addressCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF',
-    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#121620",
+    borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-  },
-  selectedAddressCard: {
     borderWidth: 1,
-    borderColor: '#D32F2F', // Cambiado a rojo
+    borderColor: "transparent",
   },
-  locationIcon: {
-    marginRight: 12,
-  },
-  addressInfo: {
-    flex: 1,
-  },
+  selectedAddressCard: { borderColor: "#F5F5DC", backgroundColor: "#1A2332" },
+  locationIcon: { marginRight: 12 },
+
+  addressInfo: { flex: 1 },
   addressName: {
     fontSize: 15,
-    fontWeight: '500',
-    color: '#000',
-    marginBottom: 2,
+    fontWeight: "600",
+    color: "#F5F5DC",
+    marginBottom: 4,
   },
-  addressDescription: {
-    fontSize: 13,
-    color: '#666',
-  },
-  tickIcon: {
-    marginRight: 12,
-  },
-  deleteButton: {
-    padding: 4,
-    marginLeft: 8,
-    zIndex: 1,
-  },
-  loadingContainer: {
+  addressDescription: { fontSize: 13, color: "#A0A0A0" },
+  tickIcon: { marginRight: 12 },
+
+  deleteButton: { padding: 8, marginLeft: 8 },
+
+  /* Empty */
+  emptyContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
+    paddingTop: 60,
   },
-  noAddressesText: {
-    fontSize: 15,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 20,
-  },
+  noAddressesText: { fontSize: 15, color: "#A0A0A0", marginTop: 12 },
 });

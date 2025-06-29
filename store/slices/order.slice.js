@@ -1,24 +1,27 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// redux/slices/order.slice.js        (completo – incluye shop_id)
+// redux/slices/order.slice.js   (completo – tracking + shop_id + ubicación)
 // ─────────────────────────────────────────────────────────────────────────────
 import { createSlice } from "@reduxjs/toolkit";
 
 /* ───────────────────────── Initial State ───────────────────────── */
 const initialState = {
   currentOrder: {
-    id          : null,
-    user_id     : null,
-    shop_id     : null,      // ←── NUEVO  ⚠️  (id del comercio)
-    partner_id  : null,
-    price       : 0,
-    finalPrice  : 0,
-    deliveryFee : 0,
-    deliveryAddress: "",
-    items       : [],
-    status      : "pendiente",
+    id:             null,
+    user_id:        null,
+    shop_id:        null,   // ← id del comercio
+    partner_id:     null,
+    price:          0,
+    finalPrice:     0,
+    deliveryFee:    0,
+    deliveryAddress:"",
+    deliveryLat:    null,   // ← coordenadas del repartidor
+    deliveryLng:    null,
+    deliveryName:   "",
+    items:          [],
+    status:         "pendiente",
   },
   historicOrders: [],
-  activeOrders  : [],
+  activeOrders:   [],
 };
 
 /* ────────────────────────── Slice ──────────────────────────────── */
@@ -26,15 +29,20 @@ const orderSlice = createSlice({
   name: "order",
   initialState,
   reducers: {
-    /* ------- Current order ------- */
+    /* ------- Orden actual ------- */
     setCurrentOrder: (state, { payload }) => {
       state.currentOrder = { ...state.currentOrder, ...payload };
     },
-    setOrderItems: (state, { payload }) => {
-      state.currentOrder.items = payload;
-    },
-    clearCurrentOrder: (state) => {
-      state.currentOrder = initialState.currentOrder;
+    setOrderItems: (state, { payload }) => { state.currentOrder.items = payload },
+    clearCurrentOrder: (state) => { state.currentOrder = initialState.currentOrder },
+
+    /* ------- Tracking en vivo (nueva acción) ------- */
+    updateOrderLocation: (state, { payload }) => {
+      const { deliveryLat, deliveryLng, deliveryName } = payload;
+      if (!state.currentOrder) return;
+      state.currentOrder.deliveryLat  = deliveryLat;
+      state.currentOrder.deliveryLng  = deliveryLng;
+      state.currentOrder.deliveryName = deliveryName;
     },
 
     /* ------- Activas + históricas ------- */
@@ -85,6 +93,7 @@ export const {
   setCurrentOrder,
   setOrderItems,
   clearCurrentOrder,
+  updateOrderLocation,        // ← exportamos la nueva acción
   addCurrentOrderToActiveOrders,
   addHistoricOrder,
   updateOrderState,

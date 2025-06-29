@@ -1,4 +1,7 @@
-import React, { useRef, useState, useEffect } from 'react';
+/* ─────────────────────── ConfirmAddressMap.jsx ─────────────────────── */
+"use client"
+
+import { useRef, useState, useEffect, useMemo } from "react"
 import {
   Modal,
   View,
@@ -7,13 +10,28 @@ import {
   TouchableOpacity,
   Text,
   TextInput,
-} from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
-import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
-import { GOOGLE_API_KEY } from '@env';
+} from "react-native"
+import MapView, { Marker } from "react-native-maps"
+import { GooglePlacesAutocomplete } from "react-native-google-places-autocomplete"
+import { GOOGLE_API_KEY } from "@env"
 
-const screenWidth = Dimensions.get('window').width;
-const screenHeight = Dimensions.get('window').height;
+/* same props-fix helper ------------------------------------------------ */
+const GOOGLE_PROPS_FIX = {
+  minLength:                     2,
+  timeout:                       1000,
+  debounce:                      300,
+  fetchDetails:                  true,
+  enablePoweredByContainer:      true,
+  nearbyPlacesAPI:               "GooglePlacesSearch",
+  predefinedPlaces:              [],
+  predefinedPlacesAlwaysVisible: false,
+  textInputProps:                {},
+  filterResults: (results = []) => results.filter(r => Array.isArray(r?.types)),
+}
+
+/* --------------------------------------------------------------------- */
+const screenWidth  = Dimensions.get("window").width
+const screenHeight = Dimensions.get("window").height
 
 export default function ConfirmAddressMap({
   visible,
@@ -22,144 +40,107 @@ export default function ConfirmAddressMap({
   defaultLng,
   onConfirm,
 }) {
-  // Región inicial y marcador
+  /* ---------- state ---------- */
   const [region, setRegion] = useState({
-    latitude: defaultLat || 37.78825,
-    longitude: defaultLng || -122.4324,
-    latitudeDelta: 0.01,
+    latitude:       defaultLat || 37.78825,
+    longitude:      defaultLng || -122.4324,
+    latitudeDelta:  0.01,
     longitudeDelta: 0.01,
-  });
-
+  })
   const [markerCoords, setMarkerCoords] = useState({
-    latitude: defaultLat || 37.78825,
+    latitude:  defaultLat || 37.78825,
     longitude: defaultLng || -122.4324,
-  });
+  })
+  const [currentAddress,      setCurrentAddress]      = useState("")
+  const [detailsModalVisible, setDetailsModalVisible] = useState(false)
+  const [additionalDetails,   setAdditionalDetails]   = useState("")
 
-  // Dirección que obtenemos desde las coordenadas
-  const [currentAddress, setCurrentAddress] = useState('');
+  const googlePlacesRef = useRef(null)
+  const mapRef          = useRef(null)
 
-  // Manejo del modal para detalles adicionales
-  const [detailsModalVisible, setDetailsModalVisible] = useState(false);
-  const [additionalDetails, setAdditionalDetails] = useState('');
+  /* ---------- Google query ---------- */
+  const googleQuery = useMemo(() => ({
+    key: GOOGLE_API_KEY,
+    language: "en",
+    types: [],
+  }), [])
 
-  const googlePlacesRef = useRef(null);
-
+  /* ---------- fetch initial address ---------- */
   useEffect(() => {
-    // Al montar o cambiar coords, obtenemos la dirección
-    fetchAddressFromCoords(markerCoords.latitude, markerCoords.longitude);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    fetchAddressFromCoords(markerCoords.latitude, markerCoords.longitude)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Función para obtener dirección a partir de lat/lng usando la Geocoding API de Google
-  const fetchAddressFromCoords = async (latitude, longitude) => {
+  const fetchAddressFromCoords = async (lat, lng) => {
     try {
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_API_KEY}`
-      );
-      const data = await response.json();
-      if (data.results && data.results.length > 0) {
-        const address = data.results[0].formatted_address;
-        setCurrentAddress(address);
+      const res  = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_API_KEY}`,
+      )
+      const data = await res.json()
+      if (data.results?.length) {
+        const txt = data.results[0].formatted_address
+        setCurrentAddress(txt)
+        googlePlacesRef.current?.setAddressText(txt)
       }
-    } catch (error) {
-      console.error('Error al obtener la dirección:', error);
+    } catch (err) {
+      console.error("reverse geocode:", err)
     }
-  };
+  }
 
-  // Cada vez que el usuario mueve el marcador o hace tap en el mapa
-  const updateMarkerAndAddress = async (latitude, longitude) => {
-    setMarkerCoords({ latitude, longitude });
-    setRegion((prev) => ({
-      ...prev,
-      latitude,
-      longitude,
-    }));
+  /* ---------- helpers ---------- */
+  const updateCoords = async (lat, lng) => {
+    setMarkerCoords({ latitude: lat, longitude: lng })
+    setRegion(prev => ({ ...prev, latitude: lat, longitude: lng }))
 
-    // Obtenemos la dirección usando Google
-    await fetchAddressFromCoords(latitude, longitude);
+    await fetchAddressFromCoords(lat, lng)
+  }
 
-    // Si quisieras actualizar el texto del Autocomplete
-    if (googlePlacesRef.current) {
-      googlePlacesRef.current.setAddressText('');
-    }
-  };
+  /* ---------- map handlers ---------- */
+  const handleDragEnd  = e => {
+    const { latitude, longitude } = e.nativeEvent.coordinate
+    updateCoords(latitude, longitude)
+  }
+  const handleMapPress = e => {
+    const { latitude, longitude } = e.nativeEvent.coordinate
+    updateCoords(latitude, longitude)
+  }
 
-  const handleDragEnd = (e) => {
-    const { latitude, longitude } = e.nativeEvent.coordinate;
-    updateMarkerAndAddress(latitude, longitude);
-  };
+  /* ---------- flow ---------- */
+  const handleConfirm = () => setDetailsModalVisible(true)
 
-  const handleMapPress = (e) => {
-    const { latitude, longitude } = e.nativeEvent.coordinate;
-    updateMarkerAndAddress(latitude, longitude);
-  };
-
-  // Cuando se presiona "Confirmar Ubicación"
-  const handleConfirm = () => {
-    // Abrimos el modal para detalles adicionales
-    setDetailsModalVisible(true);
-  };
-
-  // Guardar los detalles y cerrar
   const handleSaveDetails = () => {
-    // Enviamos todo al padre
     onConfirm({
-      latitude: markerCoords.latitude,
-      longitude: markerCoords.longitude,
-      address: currentAddress || 'Sin dirección',
-      additionalDetails: additionalDetails.trim() || 'Sin detalles',
-    });
-    setDetailsModalVisible(false);
-    onClose();
-  };
+      latitude:          markerCoords.latitude,
+      longitude:         markerCoords.longitude,
+      address:           currentAddress || "Unknown address",
+      additionalDetails: additionalDetails.trim() || "No details",
+    })
+    setDetailsModalVisible(false)
+    onClose()
+  }
 
+  /* ---------- UI ---------- */
   return (
     <Modal visible={visible} transparent animationType="slide">
       <View style={styles.modalOverlay}>
         <View style={styles.mapContainer}>
-          {/* Barra de búsqueda de direcciones */}
+          {/* Autocomplete */}
           <GooglePlacesAutocomplete
             ref={googlePlacesRef}
-            placeholder="Buscar dirección"
-            fetchDetails
-            minLength={2}
-            debounce={300}
+            placeholder="Search address"
+            query={googleQuery}
             onPress={(data, details = null) => {
-              if (details && details.geometry) {
-                const { lat, lng } = details.geometry.location;
-                updateMarkerAndAddress(lat, lng);
+              if (details?.geometry) {
+                const { lat, lng } = details.geometry.location
+                updateCoords(lat, lng)
               }
             }}
-            query={{
-              key: GOOGLE_API_KEY,
-              language: 'es',
-            }}
-            styles={{
-              container: {
-                position: 'absolute',
-                width: '90%',
-                top: 10,
-                alignSelf: 'center',
-                zIndex: 9999,
-              },
-              textInputContainer: {
-                borderRadius: 5,
-                borderWidth: 1,
-                borderColor: '#ccc',
-              },
-              textInput: {
-                height: 40,
-                paddingHorizontal: 10,
-                backgroundColor: '#fff',
-              },
-              listView: {
-                backgroundColor: '#fff',
-              },
-            }}
+            styles={gStyles}
+            {...GOOGLE_PROPS_FIX}
           />
 
-          {/* Mapa con el marcador */}
+          {/* Map */}
           <MapView
+            ref={mapRef}
             style={styles.map}
             region={region}
             onPress={handleMapPress}
@@ -171,13 +152,13 @@ export default function ConfirmAddressMap({
             />
           </MapView>
 
-          {/* Botón de Confirmar Ubicación */}
+          {/* Confirm btn */}
           <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
-            <Text style={styles.confirmText}>Confirmar Ubicación</Text>
+            <Text style={styles.confirmText}>Confirm location</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Modal para los detalles adicionales */}
+        {/* Extra details modal */}
         <Modal
           visible={detailsModalVisible}
           transparent
@@ -186,16 +167,17 @@ export default function ConfirmAddressMap({
         >
           <View style={styles.detailsModal}>
             <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Detalles adicionales</Text>
+              <Text style={styles.modalTitle}>Additional details</Text>
               <TextInput
                 style={styles.detailsInput}
-                placeholder="Ej: Número de departamento, instrucciones..."
+                placeholder="e.g. apt. number, instructions…"
+                placeholderTextColor="#A0A0A0"
                 value={additionalDetails}
                 onChangeText={setAdditionalDetails}
               />
               <TouchableOpacity style={styles.saveButton} onPress={handleSaveDetails}>
                 <Text style={styles.saveButtonText}>
-                  {additionalDetails.trim() ? 'Guardar' : 'Sin detalles'}
+                  {additionalDetails.trim() ? "Save" : "Skip"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -203,89 +185,59 @@ export default function ConfirmAddressMap({
         </Modal>
       </View>
     </Modal>
-  );
+  )
 }
 
+/* ───────── styles ───────── */
 const styles = StyleSheet.create({
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+  modalOverlay:{ flex:1, backgroundColor:"rgba(10,12,16,0.9)" },
+  mapContainer:{ flex:1, marginTop:80, backgroundColor:"#0A0C10" },
+  map:{ width:screenWidth, height:screenHeight },
+  confirmButton:{
+    position:"absolute", bottom:40, left:20, right:20,
+    backgroundColor:"#F5F5DC", borderRadius:8, padding:16, alignItems:"center",
   },
-  mapContainer: {
-    flex: 1,
-    marginTop: 80,
-    backgroundColor: '#fff',
+  confirmText:{ color:"#0A0C10", fontWeight:"600", fontSize:15 },
+
+  detailsModal:{
+    flex:1, justifyContent:"center", alignItems:"center", padding:20,
+    backgroundColor:"rgba(10,12,16,0.9)",
   },
-  map: {
-    width: screenWidth,
-    height: screenHeight,
+  modalContent:{
+    width:screenWidth*0.9, backgroundColor:"#121620",
+    borderRadius:16, padding:24, alignItems:"center",
   },
-  confirmButton: {
-    position: 'absolute',
-    bottom: 40,
-    left: 20,
-    right: 20,
-    backgroundColor: '#6D28D9',
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
+  modalTitle:{
+    fontSize:18, fontWeight:"700", color:"#F5F5DC",
+    marginBottom:20, textAlign:"center",
   },
-  confirmText: {
-    color: '#fff',
-    fontWeight: 'bold',
+  detailsInput:{
+    width:"100%", height:50, backgroundColor:"#0A0C10",
+    paddingHorizontal:15, borderRadius:8,
+    borderWidth:1, borderColor:"#1A2332",
+    marginBottom:20, fontSize:16, color:"#F5F5DC",
   },
-  detailsModal: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+  saveButton:{
+    backgroundColor:"#F5F5DC", paddingVertical:14,
+    paddingHorizontal:25, borderRadius:8, width:"100%", alignItems:"center",
   },
-  modalContent: {
-    width: screenWidth * 0.9,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-    elevation: 5,
+  saveButtonText:{ color:"#0A0C10", fontWeight:"600", fontSize:15 },
+})
+
+/* dark theme for autocomplete */
+const gStyles = {
+  container:{ position:"absolute", width:"90%", top:10, alignSelf:"center", zIndex:9999 },
+  textInputContainer:{
+    backgroundColor:"#121620",
+    borderRadius:8, borderWidth:1, borderColor:"#1A2332",
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 20,
-    textAlign: 'center',
+  textInput:{
+    height:40, paddingHorizontal:12,
+    backgroundColor:"#121620", color:"#F5F5DC", fontSize:14,
   },
-  detailsInput: {
-    width: '100%',
-    height: 50,
-    backgroundColor: '#f5f5f5',
-    paddingHorizontal: 15,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    marginBottom: 20,
-    fontSize: 16,
-    color: '#333',
-  },
-  saveButton: {
-    backgroundColor: '#6D28D9',
-    paddingVertical: 12,
-    paddingHorizontal: 25,
-    borderRadius: 8,
-    width: '100%',
-    alignItems: 'center',
-  },
-  saveButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-});
+  listView:{ backgroundColor:"#121620", borderRadius:8, marginTop:2 },
+  row:{ backgroundColor:"#121620", padding:12,
+        borderBottomWidth:1, borderBottomColor:"#1A2332" },
+  description:{ color:"#F5F5DC", fontSize:14 },
+  predefinedPlacesDescription:{ color:"#A0A0A0" },
+}

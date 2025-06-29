@@ -1,4 +1,7 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+/* SelectNewAddress – fully working ------------------------------------------------ */
+"use client";
+
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -6,399 +9,331 @@ import {
   TouchableOpacity,
   TextInput,
   Dimensions,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import MapView, { Marker } from 'react-native-maps';
-import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
-import axios from 'react-native-axios';
-import { useSelector } from 'react-redux';
-import { GOOGLE_API_KEY, API_URL } from '@env';
-console.log(GOOGLE_API_KEY)
+  Platform,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import Icon from "react-native-vector-icons/MaterialCommunityIcons";
+import MapView, { Marker } from "react-native-maps";
+import { GooglePlacesAutocomplete } from "react-native-google-places-autocomplete";
+import axios from "react-native-axios";
+import { useSelector } from "react-redux";
+import { GOOGLE_API_KEY, API_URL } from "@env";
+import { GOOGLE_PROPS_FIX } from "../components/GooglePLacesProps"; // minLength • timeout • filterResults …
 
-const SelectNewAddress = ({ navigation, route }) => {
-  const { addressParam } = route.params || {};
-  const token = useSelector((state) => state.user.userInfo.token);
-  const user_id = useSelector((state) => state.user.userInfo.id);
+/* -------------------------------------------------------------------------- */
+
+const { height: screenH } = Dimensions.get("window");
+const DEFAULT_POS = { latitude: -34.603722, longitude: -58.381592 };
+
+export default function SelectNewAddress({ navigation, route }) {
+  /* ───────── params ───────── */
+  const { addressParam = null } = route.params || {};
+
+  /* ───────── redux ───────── */
+  const token   = useSelector(s => s.user?.token);
+  const user_id = useSelector(s => s.user?.userInfo?.id ?? null);
+
+  /* ───────── local ───────── */
   const [addressId, setAddressId] = useState(null);
-
-  // Estado para los campos de dirección
-  const [address, setAddress] = useState({
-    street: '',
-    floor: '',
-    comments: '',
-    type: 'home',
-    city: '',
-    state: '',
-    zipCode: '',
-    country: '',
+  const [address, setAddress]     = useState({
+    street:   "",
+    floor:    "",
+    comments: "",
+    type:     "home",
+    city:     "",
+    state:    "",
+    zipCode:  "",
+    country:  "",
   });
 
-  const [region, setRegion] = useState({
-    latitude: -34.603722,
-    longitude: -58.381592,
-    latitudeDelta: 0.01,
-    longitudeDelta: 0.01,
-  });
+  const [region, setRegion]   = useState({ ...DEFAULT_POS, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+  const [marker, setMarker]   = useState({ ...DEFAULT_POS });
 
-  const [markerCoords, setMarkerCoords] = useState({
-    latitude: -34.603722,
-    longitude: -58.381592,
-  });
+  /* refs */
+  const gRef  = useRef(null); // GooglePlacesAutocomplete
+  const mapR  = useRef(null);
+  const once  = useRef(false);
 
-  const googlePlacesRef = useRef(null);
-  const mapRef = useRef(null);
-  const hasAddressParamBeenHandled = useRef(false);
-
-  const googleQuery = useMemo(() => {
-    return {
-      key: GOOGLE_API_KEY,
-      language: 'es',
-    };
-  }, [GOOGLE_API_KEY]);
-
-  const googleStyles = useMemo(
-    () => ({
-      container: { flex: 0 },
-      textInputContainer: {
-        backgroundColor: '#f5f5f5',
-        borderRadius: 8,
-        paddingHorizontal: 12,
-      },
-      textInput: {
-        height: 44,
-        fontSize: 15,
-        backgroundColor: '#f5f5f5',
-      },
-      listView: {
-        backgroundColor: '#fff',
-        borderRadius: 8,
-        marginTop: 8,
-      },
-    }),
-    []
+  /* ───────── Google props ───────── */
+  const gQuery = useMemo(
+    () => ({ key: GOOGLE_API_KEY, language: "en", types: [] }),
+    [],
   );
+  const gStyles = {
+    container          : { flex: 0 },
+    textInputContainer : { backgroundColor: "#121620", borderRadius: 8, paddingHorizontal: 12 },
+    textInput          : { height: 44, fontSize: 15, color: "#F5F5DC", backgroundColor: "#121620" },
+    listView           : { backgroundColor: "#121620", borderRadius: 8, marginTop: 8 },
+    row                : { backgroundColor: "#121620" },
+    description        : { color: "#F5F5DC" },
+    separator          : { backgroundColor: "#1A2332" },
+  };
 
+  /* ───────── hydrate when editing ───────── */
   useEffect(() => {
-    if (addressParam && !hasAddressParamBeenHandled.current) {
-      setAddressId(addressParam.id);
-      setAddress((prev) => ({
+    if (addressParam && !once.current) {
+      setAddressId(addressParam.id ?? null);
+      setAddress(prev => ({
         ...prev,
-        street: addressParam.street || '',
-        floor: addressParam.floor || '',
-        comments: addressParam.comments || '',
-        type: addressParam.type || 'home',
-        city: addressParam.city || '',
-        state: addressParam.state || '',
-        zipCode: addressParam.zipCode || '',
-        country: addressParam.country || '',
+        street  : addressParam.street   ?? "",
+        floor   : addressParam.floor    ?? "",
+        comments: addressParam.comments ?? "",
+        type    : addressParam.type     ?? "home",
+        city    : addressParam.city     ?? "",
+        state   : addressParam.state    ?? "",
+        zipCode : addressParam.zipCode  ?? "",
+        country : addressParam.country  ?? "",
       }));
 
       if (addressParam.latitude && addressParam.longitude) {
-        setMarkerCoords({
-          latitude: addressParam.latitude,
-          longitude: addressParam.longitude,
-        });
-        setRegion({
-          latitude: addressParam.latitude,
-          longitude: addressParam.longitude,
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        });
+        const { latitude, longitude } = addressParam;
+        setMarker({ latitude, longitude });
+        setRegion({ latitude, longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+        gRef.current?.setAddressText(addressParam.street ?? "");
       }
-      hasAddressParamBeenHandled.current = true;
+      once.current = true;
     }
   }, [addressParam]);
 
-  const handlePlaceSelect = (data, details) => {
-    if (details && details.geometry) {
-      const { lat, lng } = details.geometry.location;
-      const addressComponents = details.address_components;
-
-      // Helper para obtener valores de address_components
-      const getComponent = (type) =>
-        addressComponents.find((component) => component.types.includes(type))?.long_name || '';
-
-      const city = getComponent('locality');
-      const state = getComponent('administrative_area_level_1');
-      const zipCode = getComponent('postal_code');
-      const country = getComponent('country');
-
-      setMarkerCoords({ latitude: lat, longitude: lng });
-      setRegion({
-        latitude: lat,
-        longitude: lng,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      });
-
-      // Actualizamos el estado con los valores obtenidos
-      setAddress((prev) => ({
-        ...prev,
-        street: details.formatted_address || data.description,
-        city,
-        state,
-        zipCode: zipCode || '',
-        country,
-      }));
-
-      if (mapRef.current) {
-        mapRef.current.animateToRegion(
-          {
-            latitude: lat,
-            longitude: lng,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
-          },
-          1000
-        );
-      }
-    }
+  /* helper – keep text box & state aligned */
+  const writeStreet = full => {
+    gRef.current?.setAddressText(full);
+    setAddress(prev => ({ ...prev, street: full }));
   };
 
-  const handleMapPress = (e) => {
-    const { latitude, longitude } = e.nativeEvent.coordinate;
-    setMarkerCoords({ latitude, longitude });
-    setRegion((prev) => ({
+  /* ---------- Google suggestion tapped ---------- */
+  const onSuggestion = (data, details = null) => {
+    console.log("🔥 onPress fired › ", data.description);     // <-- debug
+    if (!details?.geometry) return;
+
+    /* place geometry */
+    const { lat, lng } = details.geometry.location;
+    setMarker({ latitude: lat, longitude: lng });
+    setRegion({ latitude: lat, longitude: lng, latitudeDelta: 0.01, longitudeDelta: 0.01 });
+    mapR.current?.animateToRegion(
+      { latitude: lat, longitude: lng, latitudeDelta: 0.01, longitudeDelta: 0.01 },
+      500,
+    );
+
+    /* address components */
+    const comps = details.address_components || [];
+    const get   = t => comps.find(c => c.types?.includes(t))?.long_name ?? "";
+    const full  = details.formatted_address || data.description;
+
+    setAddress(prev => ({
       ...prev,
-      latitude,
-      longitude,
+      street : full,
+      city   : get("locality"),
+      state  : get("administrative_area_level_1"),
+      zipCode: get("postal_code"),
+      country: get("country"),
     }));
+    gRef.current?.setAddressText(full); // reflect in UI
   };
 
-  const handleSaveAddress = async () => {
-    const data = {
-      user_id,
-      street: address.street,
-      floor: address.floor,
-      comments: address.comments,
-      type: address.type,
-      latitude: markerCoords.latitude,
-      longitude: markerCoords.longitude,
-      city: address.city,
-      state: address.state,
-      zipCode: address.zipCode,
-      country: address.country,
-    };
+  /* ---------- map interaction ---------- */
+  const setCoords = async (lat, lng) => {
+    setMarker({ latitude: lat, longitude: lng });
+    setRegion(prev => ({ ...prev, latitude: lat, longitude: lng }));
 
     try {
-      if (addressId) {
-        await axios.put(`${API_URL}/user/updateAddress/${addressId}`, data, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        console.log('Dirección actualizada');
-      } else {
-        await axios.post(`${API_URL}/user/addAddress`, data, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        console.log('Dirección guardada');
-      }
-      navigation.goBack();
-    } catch (error) {
-      console.error('Error al guardar la dirección:', error);
-      alert('Hubo un problema al guardar la dirección.');
+      const res  = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_API_KEY}`);
+      const data = await res.json();
+      const full = data.results?.[0]?.formatted_address ?? "";
+      writeStreet(full);
+    } catch (err) {
+      console.error("reverse-geocode:", err);
     }
   };
 
-  const AddressTypeButton = ({ type, icon, label }) => (
-    <TouchableOpacity
-      style={[
-        styles.typeButton,
-        address.type === type && styles.typeButtonActive,
-      ]}
-      onPress={() => setAddress((prev) => ({ ...prev, type }))}
-    >
-      <Icon
-        name={icon}
-        size={24}
-        color={address.type === type ? '#D32F2F' : '#666'}
-      />
-      <Text
-        style={[
-          styles.typeButtonText,
-          address.type === type && styles.typeButtonTextActive,
-        ]}
-      >
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
+  /* ---------- save to backend ---------- */
+  const saveAddress = async () => {
+    const payload = { user_id, ...address, latitude: marker.latitude, longitude: marker.longitude };
+    try {
+      if (addressId) {
+        await axios.put(`${API_URL}/addresses/${addressId}`, payload, { headers: { Authorization: `Bearer ${token}` } });
+      } else {
+        await axios.post(`${API_URL}/addresses`, payload, { headers: { Authorization: `Bearer ${token}` } });
+      }
+      navigation.goBack();
+    } catch (err) {
+      console.error("saveAddress:", err);
+      alert("Could not save the address.");
+    }
+  };
 
+  /* ───────── UI ───────── */
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="arrow-left" size={24} color="#FFF" />
+    <SafeAreaView style={st.container} edges={["top"]}>
+      {/* header */}
+      <View style={st.header}>
+        <TouchableOpacity onPress={navigation.goBack} style={st.backBtn}>
+          <Icon name="arrow-left" size={24} color="#F5F5DC" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          {addressId ? 'Editar dirección' : 'Agregar nueva dirección'}
-        </Text>
+        <Text style={st.hTitle}>{addressId ? "Edit address" : "Add address"}</Text>
       </View>
 
-      <View style={styles.mapContainer}>
+      {/* map */}
+      <View style={st.mapBox}>
         <MapView
-          ref={mapRef}
-          style={styles.map}
+          ref={mapR}
+          style={st.map}
           region={region}
-          onPress={handleMapPress}
+          onPress={e => {
+            const { latitude, longitude } = e.nativeEvent.coordinate;
+            setCoords(latitude, longitude);
+          }}
         >
-          <Marker coordinate={markerCoords} />
+          <Marker
+            coordinate={marker}
+            draggable
+            onDragEnd={e => {
+              const { latitude, longitude } = e.nativeEvent.coordinate;
+              setCoords(latitude, longitude);
+            }}
+          />
         </MapView>
       </View>
 
-      <View style={styles.contentContainer}>
-        <View style={styles.searchContainer}>
+      {/* form */}
+      <View style={st.content}>
+        <View style={st.searchBox}>
           <GooglePlacesAutocomplete
-            ref={googlePlacesRef}
-            placeholder="Dirección*"
-            fetchDetails
-            minLength={2}
-            debounce={300}
-            query={googleQuery}
-            onPress={handlePlaceSelect}
-            styles={googleStyles}
+            ref={gRef}
+            placeholder="Address*"
+            query={gQuery}
+            fetchDetails             // <-- required for geometry
+            keyboardShouldPersistTaps="handled"
+            enablePoweredByContainer
+            onPress={onSuggestion}
+            styles={gStyles}
             textInputProps={{
               value: address.street,
-              onChangeText: (text) =>
-                setAddress((prev) => ({ ...prev, street: text })),
+              onChangeText: t => setAddress(prev => ({ ...prev, street: t })),
+              placeholderTextColor: "#A0A0A0",
             }}
+            {...GOOGLE_PROPS_FIX}
           />
         </View>
 
-        <View style={styles.form}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Piso / Depto</Text>
+        <View style={st.form}>
+          {/* floor / unit */}
+          <View style={st.group}>
+            <Text style={st.label}>Floor / Unit</Text>
             <TextInput
-              style={styles.input}
+              style={st.input}
               value={address.floor}
-              onChangeText={(text) =>
-                setAddress((prev) => ({ ...prev, floor: text }))
-              }
-              placeholder="Ej: 3B"
+              onChangeText={t => setAddress(prev => ({ ...prev, floor: t }))}
+              placeholder="e.g. 3B"
+              placeholderTextColor="#A0A0A0"
             />
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Comentarios</Text>
+          {/* comments */}
+          <View style={st.group}>
+            <Text style={st.label}>Comments</Text>
             <TextInput
-              style={styles.input}
+              style={st.input}
               value={address.comments}
-              onChangeText={(text) =>
-                setAddress((prev) => ({ ...prev, comments: text }))
-              }
-              placeholder="Ej: No anda el timbre, llamar"
+              onChangeText={t => setAddress(prev => ({ ...prev, comments: t }))}
+              placeholder="Doorbell broken, call me"
+              placeholderTextColor="#A0A0A0"
               multiline
             />
           </View>
 
-          <View style={styles.typeContainer}>
-            <AddressTypeButton type="home" icon="home" label="Casa" />
-            <AddressTypeButton type="work" icon="briefcase" label="Trabajo" />
-            <AddressTypeButton type="other" icon="map-marker" label="Otro" />
+          {/* type */}
+          <View style={st.typeRow}>
+            {["home", "work", "other"].map(t => (
+              <TouchableOpacity
+                key={t}
+                style={[st.typeBtn, address.type === t && st.typeBtnActive]}
+                onPress={() => setAddress(prev => ({ ...prev, type: t }))}
+              >
+                <Icon
+                  name={t === "home" ? "home" : t === "work" ? "briefcase" : "map-marker"}
+                  size={24}
+                  color={address.type === t ? "#F5F5DC" : "#A0A0A0"}
+                />
+                <Text style={[st.typeTxt, address.type === t && st.typeTxtActive]}>
+                  {t.charAt(0).toUpperCase() + t.slice(1)}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
 
-          <TouchableOpacity style={styles.saveButton} onPress={handleSaveAddress}>
-            <Text style={styles.saveButtonText}>
-              {addressId ? 'Actualizar dirección' : 'Guardar dirección'}
-            </Text>
+          {/* save */}
+          <TouchableOpacity style={st.saveBtn} onPress={saveAddress}>
+            <Text style={st.saveTxt}>{addressId ? "Update" : "Save"} address</Text>
           </TouchableOpacity>
         </View>
       </View>
     </SafeAreaView>
   );
-};
+}
 
-export default SelectNewAddress;
+/* -------------------------------------------------------------------------- */
+/* styles ------------------------------------------------------------------- */
+const st = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#0A0C10" },
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#D32F2F', // Cambiado a rojo para consistencia
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    backgroundColor: "#121620",
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    ...Platform.select({
+      ios: { shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 3 },
+      android: { elevation: 3 },
+    }),
   },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFF', // Texto en blanco
-    marginLeft: 16,
-  },
-  backButton: {
-    padding: 4,
-  },
-  mapContainer: {
-    height: Dimensions.get('window').height * 0.35,
-  },
-  map: {
-    flex: 1,
-  },
-  contentContainer: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  searchContainer: {
+  hTitle: { fontSize: 18, fontWeight: "700", color: "#F5F5DC", marginLeft: 16 },
+  backBtn: { padding: 4 },
+
+  mapBox: { height: screenH * 0.35 },
+  map: { flex: 1 },
+
+  content: { flex: 1 },
+  searchBox: {
     padding: 16,
-    backgroundColor: '#fff',
+    backgroundColor: "#0A0C10",
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: "#1A2332",
   },
-  form: {
-    padding: 16,
-  },
-  inputGroup: {
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 8,
-  },
+
+  form: { padding: 16 },
+  group: { marginBottom: 16 },
+
+  label: { fontSize: 14, color: "#F5F5DC", marginBottom: 8, fontWeight: "500" },
   input: {
-    backgroundColor: '#f5f5f5',
+    backgroundColor: "#121620",
     borderRadius: 8,
     padding: 12,
     fontSize: 15,
     minHeight: 44,
+    borderWidth: 1,
+    borderColor: "#1A2332",
+    color: "#F5F5DC",
   },
-  typeContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 24,
-  },
-  typeButton: {
-    alignItems: 'center',
+
+  typeRow: { flexDirection: "row", justifyContent: "space-around", marginBottom: 24 },
+  typeBtn: {
+    alignItems: "center",
     padding: 12,
     borderRadius: 8,
     flex: 1,
     marginHorizontal: 4,
+    backgroundColor: "#121620",
+    borderWidth: 1,
+    borderColor: "#1A2332",
   },
-  typeButtonActive: {
-    backgroundColor: '#F7F2FF',
-  },
-  typeButtonText: {
-    marginTop: 4,
-    fontSize: 12,
-    color: '#666',
-  },
-  typeButtonTextActive: {
-    color: '#D32F2F', // Activo en rojo
-  },
-  saveButton: {
-    backgroundColor: '#D32F2F', // Botón de guardar en rojo
-    borderRadius: 8,
-    padding: 16,
-    alignItems: 'center',
-  },
-  saveButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  typeBtnActive: { backgroundColor: "#1A2332", borderColor: "#F5F5DC" },
+  typeTxt: { marginTop: 4, fontSize: 12, color: "#A0A0A0", fontWeight: "500" },
+  typeTxtActive: { color: "#F5F5DC", fontWeight: "600" },
+
+  saveBtn: { backgroundColor: "#F5F5DC", borderRadius: 8, padding: 16, alignItems: "center" },
+  saveTxt: { color: "#0A0C10", fontSize: 16, fontWeight: "600" },
 });
