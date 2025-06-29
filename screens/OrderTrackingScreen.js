@@ -1,10 +1,8 @@
-// ─────────────────────────────────────────────────────────────
 // src/screens/OrderTrackingScreen.jsx
 // Rastreo de orden con marcador animado en tiempo real
-// ─────────────────────────────────────────────────────────────
 "use client";
 
-import {
+import React, {
   useMemo,
   useEffect,
   useState,
@@ -26,6 +24,7 @@ import MapView, {
   Polyline,
   AnimatedRegion,
   Animated as AnimatedMap,
+  PROVIDER_GOOGLE,
 } from "react-native-maps";
 import * as Location from "expo-location";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -60,7 +59,6 @@ const makeOrderSelector = createSelector(selectOrderSlice, (o) => ({
   error:        o.error,
 }));
 
-/* ─────────────────────────────────────────── */
 export default function OrderTrackingScreen({ navigation }) {
   const dispatch = useDispatch();
   const socket   = useSocket();
@@ -94,18 +92,14 @@ export default function OrderTrackingScreen({ navigation }) {
   /* ---------- Socket: ubicación ---------- */
   useEffect(() => {
     if (!socket || !currentOrder?.id) return;
-
     const handler = (data) => {
       if (data.orderId !== currentOrder.id) return;
-      dispatch(
-        updateOrderLocation({
-          deliveryLat:  data.deliveryLat,
-          deliveryLng:  data.deliveryLng,
-          deliveryName: data.deliveryName,
-        }),
-      );
+      dispatch(updateOrderLocation({
+        deliveryLat:  data.deliveryLat,
+        deliveryLng:  data.deliveryLng,
+        deliveryName: data.deliveryName,
+      }));
     };
-
     socket.on("driver_location", handler);
     return () => socket.off("driver_location", handler);
   }, [socket, currentOrder?.id, dispatch]);
@@ -155,7 +149,7 @@ export default function OrderTrackingScreen({ navigation }) {
 
   /* ---------- Destructuring de la orden ---------- */
   const {
-    shop          = {},
+    shop = {},
     pickupCode,
     deliveryCode,
     price,
@@ -197,21 +191,19 @@ export default function OrderTrackingScreen({ navigation }) {
   const showMap = status === "envio" && hasDriver && (hasUser || deviceCoords);
 
   /* ---------- Animated marker ---------- */
-  const animatedCoord = useRef(
-    new AnimatedRegion({
-      latitude:       hasDriver ? delLat : 0,
-      longitude:      hasDriver ? delLng : 0,
-      latitudeDelta:  0.001,
-      longitudeDelta: 0.001,
-    }),
-  ).current;
+  const animatedCoord = useRef(new AnimatedRegion({
+    latitude:      hasDriver ? delLat : 0,
+    longitude:     hasDriver ? delLng : 0,
+    latitudeDelta: 0.001,
+    longitudeDelta:0.001,
+  })).current;
 
   useEffect(() => {
     if (!hasDriver) return;
     animatedCoord.timing({
-      latitude:  delLat,
-      longitude: delLng,
-      duration:  1500,
+      latitude:        delLat,
+      longitude:       delLng,
+      duration:        1500,
       useNativeDriver: false,
     }).start();
   }, [delLat, delLng, hasDriver, animatedCoord]);
@@ -280,12 +272,13 @@ export default function OrderTrackingScreen({ navigation }) {
         {showMap && (
           <View style={styles.mapWrapper}>
             <AnimatedMap
+              provider={PROVIDER_GOOGLE}
               style={styles.map}
               initialRegion={initialRegion}
               showsUserLocation={false}
               followsUserLocation={false}
             >
-              {/* Línea entre driver ↔ usuario (si hay usuario) */}
+              {/* Línea entre driver ↔ usuario */}
               {hasUser && (
                 <Polyline
                   coordinates={[
@@ -301,19 +294,19 @@ export default function OrderTrackingScreen({ navigation }) {
               <Marker.Animated
                 coordinate={animatedCoord}
                 title={deliveryName || "Delivery"}
-                pinColor="#FF0000"        // rojo brillante para distinguirse
+                pinColor="#FF0000"
               />
 
-              {/* Dirección del usuario */}
+              {/* Marker del usuario */}
               {hasUser && (
                 <Marker
                   coordinate={{ latitude: userLat, longitude: userLng }}
-                  title="Your address"
+                  title="Your Address"
                   pinColor="#4CAF50"
                 />
               )}
 
-              {/* Ubicación del dispositivo (fallback) */}
+              {/* Marker fallback del dispositivo */}
               {deviceCoords && (
                 <Marker
                   coordinate={deviceCoords}
@@ -355,9 +348,9 @@ export default function OrderTrackingScreen({ navigation }) {
             <StatusBadge status={status} />
           </View>
           <View style={styles.infoGrid}>
-            <InfoCard icon="shopping-bag" label="Items"     value={`${countItems}`} />
-            <InfoCard icon="hash"         label="Order ID"  value={`#${id}`}    />
-            <InfoCard icon="truck"        label="Delivery"  value={`$${deliveryFee}`} />
+            <InfoCard icon="shopping-bag" label="Items"    value={`${countItems}`} />
+            <InfoCard icon="hash"         label="Order ID" value={`#${id}`}     />
+            <InfoCard icon="truck"        label="Delivery" value={`$${deliveryFee}`} />
           </View>
         </View>
 
@@ -374,13 +367,11 @@ export default function OrderTrackingScreen({ navigation }) {
           </View>
         </View>
 
-  
-
         {/* Codes */}
         <View style={styles.codesRow}>
           <CodeDisplay
             title="Delivery Code"
-            code={pickupCode}
+            code={deliveryCode || pickupCode}
             icon="package"
             color="#F5F5DC"
           />
@@ -402,7 +393,7 @@ const StatusBadge = ({ status }) => {
           borderColor:     color,
         },
       ]}
-    >
+    > 
       <Text style={[styles.statusBadgeText, { color }]}>{label}</Text>
     </View>
   );
@@ -451,19 +442,19 @@ const styles = StyleSheet.create({
     padding:         16,
   },
   backButton: {
-    width:             44,
-    height:            44,
-    borderRadius:      22,
-    backgroundColor:   "#121620",
-    justifyContent:    "center",
-    alignItems:        "center",
+    width:          44,
+    height:         44,
+    borderRadius:   22,
+    backgroundColor:"#121620",
+    justifyContent: "center",
+    alignItems:     "center",
   },
   headerTitle:    { color: "#F5F5DC", fontSize: 18, fontWeight: "700" },
   mapWrapper:     { height: 260, margin: 16, borderRadius: 16, overflow: "hidden" },
   map:            { flex: 1 },
   card: {
     backgroundColor: "#121620",
-    marginHorizontal: 16,
+    marginHorizontal:16,
     marginBottom:    16,
     padding:         16,
     borderRadius:    16,
@@ -472,15 +463,15 @@ const styles = StyleSheet.create({
   shopLogoContainer: { position: "relative", marginRight: 12 },
   shopLogo:          { width: 60, height: 60, borderRadius: 12, backgroundColor: "#1A2332" },
   shopBadge: {
-    position:        "absolute",
-    top:             -4,
-    right:           -4,
-    width:           24,
-    height:          24,
-    borderRadius:    12,
-    backgroundColor: "#F5F5DC",
-    justifyContent:  "center",
-    alignItems:      "center",
+    position:       "absolute",
+    top:            -4,
+    right:          -4,
+    width:          24,
+    height:         24,
+    borderRadius:   12,
+    backgroundColor:"#F5F5DC",
+    justifyContent: "center",
+    alignItems:     "center",
   },
   shopName:        { color: "#F5F5DC", fontWeight: "700", fontSize: 16 },
   shopDescription: { color: "#A0A0A0", fontSize: 12, marginTop: 2 },
@@ -495,7 +486,7 @@ const styles = StyleSheet.create({
     padding:         12,
     backgroundColor: "#1A2332",
     borderRadius:    12,
-    marginHorizontal: 4,
+    marginHorizontal:4,
   },
   infoIcon:   { marginBottom: 6 },
   infoLabel:  { color: "#A0A0A0", fontSize: 12 },
@@ -504,22 +495,9 @@ const styles = StyleSheet.create({
   summaryRow:     { flexDirection: "row", justifyContent: "space-between", marginVertical: 4 },
   summaryLabel:   { color: "#A0A0A0" },
   summaryValue:   { color: "#F5F5DC" },
-  codesRow: {
-    flexDirection:   "row",
-    gap:             12,
-    marginHorizontal: 16,
-    marginBottom:     16,
-  },
-  codeContainer: {
-    flex:            1,
-    alignItems:      "center",
-    backgroundColor: "#121620",
-    paddingVertical: 16,
-    borderRadius:    16,
-  },
-  codeIcon:  { marginBottom: 6 },
-  codeLabel: { color: "#A0A0A0", fontSize: 12 },
-  codeValue: { fontSize: 20, fontWeight: "700", letterSpacing: 2 },
-  addressHeader: { flexDirection: "row", alignItems: "center", marginBottom: 8 },
-  addressText:   { color: "#A0A0A0", lineHeight: 20 },
+  codesRow:       { flexDirection: "row", marginHorizontal: 16, marginBottom: 16 },
+  codeContainer:  { flex: 1, alignItems: "center", backgroundColor: "#121620", paddingVertical: 16, borderRadius: 16 },
+  codeIcon:       { marginBottom: 6 },
+  codeLabel:      { color: "#A0A0A0", fontSize: 12 },
+  codeValue:      { fontSize: 20, fontWeight: "700", letterSpacing: 2 },
 });
