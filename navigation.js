@@ -1,14 +1,14 @@
 // AppNavigation.js
 "use client";
 
-/* ------------ Navegación ------------ */
+/* ------------ Navigation ------------ */
 import { NavigationContainer, DefaultTheme } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import Icon from "react-native-vector-icons/Ionicons";
 
-/* ------------ Socket ------------ */
-import useSocket from "./config/socket"; // Hook que inicializa WS
+/* ------------ WebSocket Hook ------------ */
+import useSocket from "./config/socket"; // Hook to initialize WebSocket connection
 
 /* ------------ Screens ------------ */
 import AuthScreen             from "./screens/AuthScreen";
@@ -22,28 +22,28 @@ import AddressBookScreen      from "./screens/AddressBookScreen";
 import SelectNewAddress       from "./screens/SelectNewAddress";
 import OrderTrackingScreen    from "./screens/OrderTrackingScreen";
 
-/* ------------ Ref global ------------ */
+/* ------------ Global Navigation Ref ------------ */
 import { navigationRef } from "./components/NavigationRef";
 
-/* ------------ Tema Oscuro ------------ */
+/* ------------ Dark Theme ------------ */
 const customTheme = {
   ...DefaultTheme,
   colors: {
     ...DefaultTheme.colors,
-    primary: "#F5F5DC",     // Beige/crema
-    background: "#0A0C10",  // Fondo principal oscuro
-    card: "#121620",        // Fondo cards / tab
-    text: "#F5F5DC",        // Texto
-    border: "#1A2332",      // Bordes sutiles
+    primary: "#F5F5DC",     // Cream
+    background: "#0A0C10",  // Main dark background
+    card: "#121620",        // Card / tab background
+    text: "#F5F5DC",        // Text color
+    border: "#1A2332",      // Subtle borders
     notification: "#F5F5DC",
   },
 };
 
-/* ------------ Stacks / Tabs ---------- */
+/* ------------ Stack & Tab Navigators ---------- */
 const Stack = createNativeStackNavigator();
 const Tab   = createBottomTabNavigator();
 
-/* Helper iconos */
+/* Helper for tab icons */
 const getTabIcon = (routeName, focused) => {
   switch (routeName) {
     case "Home":    return focused ? "home"   : "home-outline";
@@ -69,9 +69,9 @@ function HomeTabs() {
           shadowOffset: { width: 0, height: -2 },
           shadowOpacity: 0.1,
           shadowRadius: 4,
-          height: 56,       // Ajustado
-          paddingBottom: 4, // Ajustado
-          paddingTop: 6,    // Ajustado
+          height: 56,
+          paddingBottom: 4,
+          paddingTop: 6,
         },
         tabBarActiveTintColor:   "#F5F5DC",
         tabBarInactiveTintColor: "#A0A0A0",
@@ -88,30 +88,30 @@ function HomeTabs() {
       <Tab.Screen
         name="Home"
         component={StoreCatalogScreen}
-        options={{ tabBarLabel: "Inicio" }}
+        options={{ tabBarLabel: "Home" }}
       />
       <Tab.Screen
         name="Cart"
         component={CartScreen}
-        options={{ tabBarLabel: "Carrito" }}
+        options={{ tabBarLabel: "Cart" }}
       />
       <Tab.Screen
         name="Orders"
         component={OrdersScreen}
-        options={{ tabBarLabel: "Pedidos" }}
+        options={{ tabBarLabel: "Orders" }}
       />
       <Tab.Screen
         name="Profile"
         component={ProfileScreen}
-        options={{ tabBarLabel: "Perfil" }}
+        options={{ tabBarLabel: "Profile" }}
       />
     </Tab.Navigator>
   );
 }
 
-/* ------------ Root navigator --------- */
+/* ------------ Root Navigator --------- */
 export default function AppNavigation() {
-  useSocket(); // Inicializa WebSocket
+  useSocket(); // Initialize WebSocket
 
   return (
     <NavigationContainer ref={navigationRef} theme={customTheme}>
@@ -125,21 +125,21 @@ export default function AppNavigation() {
         }}
         initialRouteName="Login"
       >
-        {/* Auth */}
+        {/* Authentication */}
         <Stack.Screen
           name="Login"
           component={AuthScreen}
           options={{ animation: "fade" }}
         />
 
-        {/* Tabs */}
+        {/* Main Tabs */}
         <Stack.Screen
           name="HomeTabs"
           component={HomeTabs}
           options={{ animation: "fade" }}
         />
 
-        {/* Detalles */}
+        {/* Detail Screens */}
         <Stack.Screen
           name="StoreDetail"
           component={StoreDetailScreen}

@@ -20,6 +20,9 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "We need continuous access to your location to support background updates.",
         "NSCameraUsageDescription": "We need access to your camera to take photos within the app.",
         "NSPhotoLibraryUsageDescription": "We need access to your photo library to allow you to select or save images."
+      },
+       "config": {
+        "googleMapsApiKey": "AIzaSyAvritMA-llcdIPnOpudxQ4aZ1b5WsHHUc"
       }
     },
     "android": {
